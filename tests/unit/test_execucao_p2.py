@@ -161,6 +161,34 @@ def test_ciclo_execucao_diagnostico_inicio_conclusao_e_rbac(client):
     )
     assert r_conc_antes.status_code == 409
 
+    # Iniciar antes do enfileiramento e reserva ativa retorna 409
+    r_ini_antes = client.post(
+        f"/v1/execucoes/{exec_id}/iniciar",
+        headers={"Authorization": f"Bearer {tok_mecanico}"},
+    )
+    assert r_ini_antes.status_code == 409
+
+    # Simula reserva ativa + pagamento confirmado + enfileiramento antes de iniciar
+    client.app.state.store.salvar(
+        "reservas",
+        str(saga_id),
+        {
+            "saga_id": str(saga_id),
+            "os_id": str(os_id),
+            "rodada": 1,
+            "status": StatusReserva.ATIVA.value,
+            "itens": [],
+        },
+    )
+    exec_doc = client.app.state.store.buscar("execucoes", exec_id)
+    assert exec_doc is not None
+    exec_doc["pagamento_id"] = str(uuid4())
+    client.app.state.store.salvar("execucoes", exec_id, exec_doc)
+    ctrl_doc = client.app.state.store.buscar("controle_saga", str(saga_id))
+    assert ctrl_doc is not None
+    ctrl_doc["estado_controle"] = EstadoControleSaga.EM_FILA.value
+    client.app.state.store.salvar("controle_saga", str(saga_id), ctrl_doc)
+
     # Iniciar reparo
     r_ini = client.post(
         f"/v1/execucoes/{exec_id}/iniciar",
@@ -204,7 +232,12 @@ def test_barreira_cancelamento_tombstone_e_disputa_com_reparo_iniciado():
     assert reserva.status == StatusReserva.LIBERADA
 
     # Caso 2: Reparo já iniciado -> recusa cancelamento automático e bloqueia liberação de reserva
-    controle_em_reparo = ControleSagaExecucao(saga_id=uuid4(), os_id=os_id, rodada=1)
+    controle_em_reparo = ControleSagaExecucao(
+        saga_id=uuid4(),
+        os_id=os_id,
+        rodada=1,
+        estado_controle=EstadoControleSaga.EM_FILA,
+    )
     controle_em_reparo.iniciar_reparo()
     recusa = controle_em_reparo.cancelar_com_tombstone(
         cancelamento_event_id=uuid4(), motivo="FALHA_ENFILEIRAMENTO"

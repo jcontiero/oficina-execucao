@@ -108,8 +108,8 @@ def consumir_comandos_pull(
                 request={"subscription": sub_path, "ack_ids": [ack_id]}
             )
             processadas += 1
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Erro ao processar comando na Execução: %s", exc)
+        except Exception:  # noqa: BLE001
+            logger.exception("Erro ao processar comando na Execução")
             try:
                 subscriber.modify_ack_deadline(
                     request={

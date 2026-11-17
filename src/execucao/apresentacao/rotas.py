@@ -78,19 +78,55 @@ def cancelar_barreira_execucao(
     cancelamento_event_id = UUID(str(body["cancelamento_event_id"]))
     motivo = str(body.get("motivo", "FALHA_ENFILEIRAMENTO"))
 
-    controle = repo.buscar_controle(saga_id) or ControleSagaExecucao(
-        saga_id=saga_id, os_id=os_id, rodada=rodada
-    )
-    resultado = controle.cancelar_com_tombstone(
-        cancelamento_event_id=cancelamento_event_id,
-        motivo=motivo,
-    )
-    repo.salvar_controle(controle)
-    doc = repo.buscar_execucao(execucao_id)
-    if doc is not None and resultado["resultado"] == "CANCELADA":
-        doc["status"] = StatusExecucao.CANCELADA.value
-        repo.salvar_execucao(execucao_id, doc)
-    return resultado
+    def _tx(tx):
+        controle_doc = tx.buscar("controle_saga", str(saga_id))
+        controle = (
+            ControleSagaExecucao(
+                saga_id=saga_id,
+                os_id=os_id,
+                rodada=int(controle_doc.get("rodada", rodada)),
+                estado_controle=EstadoControleSaga(
+                    str(controle_doc["estado_controle"])
+                ),
+                cancelamento_event_id=(
+                    UUID(str(controle_doc["cancelamento_event_id"]))
+                    if controle_doc.get("cancelamento_event_id")
+                    else None
+                ),
+                motivo_cancelamento=controle_doc.get("motivo_cancelamento"),
+                version=int(controle_doc.get("version", 1)),
+            )
+            if controle_doc is not None
+            else ControleSagaExecucao(saga_id=saga_id, os_id=os_id, rodada=rodada)
+        )
+        resultado = controle.cancelar_com_tombstone(
+            cancelamento_event_id=cancelamento_event_id,
+            motivo=motivo,
+        )
+        tx.salvar(
+            "controle_saga",
+            str(saga_id),
+            {
+                "saga_id": str(controle.saga_id),
+                "os_id": str(controle.os_id),
+                "rodada": controle.rodada,
+                "estado_controle": controle.estado_controle.value,
+                "cancelamento_event_id": (
+                    str(controle.cancelamento_event_id)
+                    if controle.cancelamento_event_id
+                    else None
+                ),
+                "motivo_cancelamento": controle.motivo_cancelamento,
+                "version": controle.version,
+            },
+        )
+        doc = tx.buscar("execucoes", execucao_id)
+        if doc is not None and resultado["resultado"] == "CANCELADA":
+            doc["status"] = StatusExecucao.CANCELADA.value
+            tx.salvar("execucoes", execucao_id, doc)
+        return resultado
+
+    return repo.store.executar_em_transacao(_tx)
 
 
 @router.post(
@@ -200,6 +236,21 @@ def iniciar_execucao(
             if controle_doc is not None
             else ControleSagaExecucao(saga_id=saga_id, os_id=os_id, rodada=rodada)
         )
+        if not doc.get("pagamento_id"):
+            raise HTTPException(
+                status_code=409,
+                detail="Pagamento ainda não autorizado para iniciar execução",
+            )
+        reserva_doc = tx.buscar("reservas", str(saga_id))
+        if (
+            reserva_doc is None
+            or reserva_doc.get("status") != StatusReserva.ATIVA.value
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Reserva de estoque ativa obrigatória para iniciar execução",
+            )
+
         try:
             controle.iniciar_reparo()
         except ValueError as exc:
@@ -218,20 +269,9 @@ def iniciar_execucao(
                 "version": controle.version,
             },
         )
-        reserva_doc = tx.buscar("reservas", str(saga_id))
-        consumida = False
-        if (
-            reserva_doc is not None
-            and reserva_doc.get("status") == StatusReserva.ATIVA.value
-        ):
-            reserva_doc["status"] = StatusReserva.CONSUMIDA.value
-            tx.salvar("reservas", str(saga_id), reserva_doc)
-            consumida = True
-        elif (
-            reserva_doc is not None
-            and reserva_doc.get("status") == StatusReserva.CONSUMIDA.value
-        ):
-            consumida = True
+        reserva_doc["status"] = StatusReserva.CONSUMIDA.value
+        tx.salvar("reservas", str(saga_id), reserva_doc)
+        consumida = True
 
         doc["status"] = StatusExecucao.EM_EXECUCAO.value
         doc["iniciada_em"] = datetime.now(timezone.utc).isoformat()
