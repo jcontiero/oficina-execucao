@@ -1,9 +1,10 @@
+from src.shared.observabilidade import traceparent_atual
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.execucao.dominio.entidades import (
     ControleSagaExecucao,
@@ -25,6 +26,21 @@ class DiagnosticoRequest(BaseModel):
     laudo: str = Field(min_length=1)
     itens_servico: list[dict[str, Any]] = Field(min_length=1)
     itens_peca: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("itens_servico", "itens_peca")
+    @classmethod
+    def validar_itens(cls, itens, info):
+        campo = "servico_id" if info.field_name == "itens_servico" else "peca_id"
+        for item in itens:
+            UUID(str(item.get(campo) or item.get("id")))
+            if (
+                int(item.get("quantidade", 1)) <= 0
+                or int(item.get("preco_unitario_centavos", -1)) < 0
+            ):
+                raise ValueError(
+                    "Quantidade deve ser positiva e preço não pode ser negativo"
+                )
+        return itens
 
 
 def require_mecanico_ou_admin(
@@ -142,7 +158,7 @@ def registrar_diagnostico(
     repo: ExecucaoRepositorioFirestore = Depends(get_repo),
 ) -> dict[str, Any]:
     env = request.app.state.config.environment
-    traceparent = request.headers.get("traceparent")
+    traceparent = traceparent_atual(request.headers.get("traceparent"))
 
     def _tx(tx):
         controle_doc = tx.buscar("controle_saga", str(body.saga_id))
@@ -212,7 +228,7 @@ def iniciar_execucao(
     repo: ExecucaoRepositorioFirestore = Depends(get_repo),
 ) -> dict[str, Any]:
     env = request.app.state.config.environment
-    traceparent = request.headers.get("traceparent")
+    traceparent = traceparent_atual(request.headers.get("traceparent"))
 
     def _tx(tx):
         doc = tx.buscar("execucoes", execucao_id)
@@ -306,7 +322,7 @@ def concluir_execucao(
     repo: ExecucaoRepositorioFirestore = Depends(get_repo),
 ) -> dict[str, Any]:
     env = request.app.state.config.environment
-    traceparent = request.headers.get("traceparent")
+    traceparent = traceparent_atual(request.headers.get("traceparent"))
 
     def _tx(tx):
         doc = tx.buscar("execucoes", execucao_id)

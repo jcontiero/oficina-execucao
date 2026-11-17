@@ -32,8 +32,26 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      checks: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Verify required checks for exact deployment commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" > /tmp/deploy-checks.json
+          python - <<'PYTHON'
+          import json
+          checks = json.load(open('/tmp/deploy-checks.json'))['check_runs']
+          required = ['validate', 'SonarCloud Code Analysis']
+          for name in required:
+              matches = [c for c in checks if c['name'] == name]
+              latest = max(matches, key=lambda c: c['id']) if matches else None
+              if latest is None or latest['conclusion'] != 'success':
+                  raise SystemExit(f'Check obrigatório ausente ou reprovado: {name}')
+          print('Checks aprovados para o SHA de deploy')
+          PYTHON
 
       - name: Set environment metadata
         id: env
@@ -85,7 +103,7 @@ jobs:
           IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}"
           GW_HOST="${GATEWAY_HOST_INPUT}"
           if [ -z "${GW_HOST}" ]; then
-            GW_HOST="oficina-gateway-${ENV_CANON}.endpoints.${PROJECT_ID}.cloud.goog"
+            GW_HOST="$(gcloud api-gateway gateways describe "oficina-gateway-${ENV_CANON}" --location=us-east1 --project="${PROJECT_ID}" --format="value(defaultHostname)")"
           fi
 
           mkdir -p /tmp/rendered-k8s
@@ -101,6 +119,7 @@ jobs:
             sed -i "s|ENVIRONMENT: \"homolog\"|ENVIRONMENT: \"${ENV_CANON}\"|g" "$f"
             sed -i "s|DD_VERSION: \"latest\"|DD_VERSION: \"${IMAGE_TAG}\"|g" "$f"
             sed -i "s|GATEWAY_HOST_PLACEHOLDER|${GW_HOST}|g" "$f"
+            sed -i 's/value: "latest"/value: "'"${IMAGE_TAG}"'"/g' "$f"
           done
 
           kubectl create namespace "${K8S_NS}" --dry-run=client -o yaml | kubectl apply -f -
