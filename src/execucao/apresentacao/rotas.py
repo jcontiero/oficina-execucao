@@ -51,6 +51,46 @@ def listar_execucoes(
     return repo.listar_execucoes()
 
 
+@router.get("/v1/execucoes/{execucao_id}", tags=["Execução"])
+def buscar_execucao(
+    execucao_id: str,
+    _principal: Principal = Depends(require_mecanico_ou_admin),
+    repo: ExecucaoRepositorioFirestore = Depends(get_repo),
+) -> dict[str, Any]:
+    doc = repo.buscar_execucao(execucao_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Execução não encontrada")
+    return doc
+
+
+@router.post("/v1/execucoes/{execucao_id}/cancelar-barreira", tags=["Execução"])
+def cancelar_barreira_execucao(
+    execucao_id: str,
+    body: dict[str, Any],
+    _principal: Principal = Depends(require_mecanico_ou_admin),
+    repo: ExecucaoRepositorioFirestore = Depends(get_repo),
+) -> dict[str, Any]:
+    saga_id = UUID(str(body["saga_id"]))
+    os_id = UUID(str(body["os_id"]))
+    rodada = int(body.get("rodada", 1))
+    cancelamento_event_id = UUID(str(body["cancelamento_event_id"]))
+    motivo = str(body.get("motivo", "FALHA_ENFILEIRAMENTO"))
+
+    controle = repo.buscar_controle(saga_id) or ControleSagaExecucao(
+        saga_id=saga_id, os_id=os_id, rodada=rodada
+    )
+    resultado = controle.cancelar_com_tombstone(
+        cancelamento_event_id=cancelamento_event_id,
+        motivo=motivo,
+    )
+    repo.salvar_controle(controle)
+    doc = repo.buscar_execucao(execucao_id)
+    if doc is not None and resultado["resultado"] == "CANCELADA":
+        doc["status"] = StatusExecucao.CANCELADA.value
+        repo.salvar_execucao(execucao_id, doc)
+    return resultado
+
+
 @router.post(
     "/v1/execucoes/{execucao_id}/diagnostico",
     status_code=status.HTTP_201_CREATED,
