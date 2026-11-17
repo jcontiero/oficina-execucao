@@ -11,6 +11,6 @@ data:
   JWT_CLIENT_ISSUER: "oficina-auth-homolog"
   JWT_ADMIN_ISSUER: "oficina-admin-homolog"
   CLIENT_JWKS_URL: "https://GATEWAY_HOST_PLACEHOLDER/.well-known/jwks.json"
-  ADMIN_JWKS_URL: "http://oficina-api/.well-known/admin-jwks.json"
+  ADMIN_JWKS_URL: "http://oficina-api-service/.well-known/admin-jwks.json"
   DD_TRACE_ENABLED: "true"
   DD_VERSION: "latest"
