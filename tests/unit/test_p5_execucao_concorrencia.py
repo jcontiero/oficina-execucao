@@ -45,6 +45,23 @@ def test_concorrencia_reparo_iniciado_antes_cancelamento() -> None:
     assert (
         cons.processar_comando(
             _cmd(
+                "ReservarPecas.v1",
+                saga_id=saga_id,
+                os_id=os_id,
+                payload={
+                    "rodada": 1,
+                    "reserva_id": str(saga_id),
+                    "orcamento_id": str(uuid4()),
+                    "orcamento_versao": 1,
+                    "itens_peca": [],
+                },
+            )
+        )
+        == "PROCESSADO"
+    )
+    assert (
+        cons.processar_comando(
+            _cmd(
                 "EnfileirarExecucao.v1",
                 saga_id=saga_id,
                 os_id=os_id,
@@ -115,6 +132,23 @@ def test_concorrencia_cancelamento_antes_iniciar_e_rejeicao_fila() -> None:
     )
 
     # EnfileirarExecucao.v1 após tombstone deve emitir ExecucaoRejeitada.v1
+    assert (
+        cons.processar_comando(
+            _cmd(
+                "ReservarPecas.v1",
+                saga_id=saga_id,
+                os_id=os_id,
+                payload={
+                    "rodada": 1,
+                    "reserva_id": str(saga_id),
+                    "orcamento_id": str(uuid4()),
+                    "orcamento_versao": 1,
+                    "itens_peca": [],
+                },
+            )
+        )
+        == "PROCESSADO"
+    )
     assert (
         cons.processar_comando(
             _cmd(

@@ -1,13 +1,11 @@
 from copy import deepcopy
 import os
 import threading
-from typing import Any, Callable, Protocol, TypeVar
+from typing import Any, Callable, Protocol
 from uuid import UUID
 
 from src.config import Configuracoes
 from src.execucao.dominio.entidades import ControleSagaExecucao, EstadoControleSaga
-
-T = TypeVar("T")
 
 
 class TransacaoContexto(Protocol):
@@ -31,7 +29,7 @@ class DocumentoStore(Protocol):
 
     def remover(self, colecao: str, doc_id: str) -> None: ...
 
-    def executar_em_transacao(self, fn: Callable[[TransacaoContexto], T]) -> T: ...
+    def executar_em_transacao[T](self, fn: Callable[[TransacaoContexto], T]) -> T: ...
 
 
 class _InMemoryTx:
@@ -89,7 +87,7 @@ class InMemoryFirestoreStore:
             col = self._cols.get(colecao, {})
             col.pop(doc_id, None)
 
-    def executar_em_transacao(self, fn: Callable[[TransacaoContexto], T]) -> T:
+    def executar_em_transacao[T](self, fn: Callable[[TransacaoContexto], T]) -> T:
         with self._lock:
             snapshot = deepcopy(self._cols)
             try:
@@ -184,7 +182,7 @@ class GoogleFirestoreStore:
     def remover(self, colecao: str, doc_id: str) -> None:
         self.client.collection(colecao).document(doc_id).delete()
 
-    def executar_em_transacao(self, fn: Callable[[TransacaoContexto], T]) -> T:
+    def executar_em_transacao[T](self, fn: Callable[[TransacaoContexto], T]) -> T:
         transaction = self.client.transaction()
 
         @self._firestore.transactional
