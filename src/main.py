@@ -78,7 +78,11 @@ def criar_app(configuracoes: Configuracoes | None = None) -> FastAPI:
 
 def _criar_app_padrao() -> FastAPI:
     cfg = Configuracoes()
-    if not cfg.firestore_emulator_host and not cfg.use_in_memory_store:
+    if (
+        cfg.environment in {"local", "test"}
+        and not cfg.firestore_emulator_host
+        and not cfg.use_in_memory_store
+    ):
         cfg.use_in_memory_store = True
     return criar_app(cfg)
 
