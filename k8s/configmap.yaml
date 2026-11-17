@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-execucao-config
+data:
+  ENVIRONMENT: "homolog"
+  GCP_PROJECT_ID: "fiap-project-514922"
+  FIRESTORE_DATABASE: "oficina-execucao-homolog"
+  USE_IN_MEMORY_STORE: "false"
+  JWT_AUDIENCE: "oficina-backend-homolog"
+  JWT_CLIENT_ISSUER: "oficina-auth-homolog"
+  JWT_ADMIN_ISSUER: "oficina-admin-homolog"
+  CLIENT_JWKS_URL: "https://GATEWAY_HOST_PLACEHOLDER/.well-known/jwks.json"
+  ADMIN_JWKS_URL: "http://oficina-api-service/.well-known/admin-jwks.json"
+  DD_TRACE_ENABLED: "true"
+  DD_VERSION: "latest"

@@ -7,10 +7,16 @@ on:
         description: "Digite 'true' para autorizar o build/push/deploy do oficina-execucao no GKE"
         required: true
         default: "false"
+      gateway_host:
+        description: "Hostname do API Gateway para CLIENT_JWKS_URL (opcional)"
+        required: false
+        default: ""
 
 env:
   PROJECT_ID: "fiap-project-514922"
   REGION: "us-east1"
+  CLUSTER_NAME: "oficina-gke-cluster"
+  CLUSTER_ZONE: "us-east1-b"
   REPOSITORY: "oficina-docker"
   IMAGE_NAME: "oficina-execucao"
 
@@ -26,24 +32,107 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      checks: read
     steps:
-      - uses: actions/checkout@v4
-      - name: Verify Homolog / Production Firestore Isolation
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Verify required checks for exact deployment commit
         env:
-          FIRESTORE_DB: ${{ vars.FIRESTORE_DATABASE }}
-          TARGET_BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Verifying Firestore target isolation for ${TARGET_BRANCH}..."
-          if [ "${TARGET_BRANCH}" = "homolog" ] && echo "${FIRESTORE_DB}" | grep -Eq "production"; then
-            echo "ERROR: Homolog deployment points to production Firestore database!"
-            exit 1
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" > /tmp/deploy-checks.json
+          python - <<'PYTHON'
+          import json
+          checks = json.load(open('/tmp/deploy-checks.json'))['check_runs']
+          required = ['validate', 'SonarCloud Code Analysis']
+          for name in required:
+              matches = [c for c in checks if c['name'] == name]
+              latest = max(matches, key=lambda c: c['id']) if matches else None
+              if latest is None or latest['conclusion'] != 'success':
+                  raise SystemExit(f'Check obrigatório ausente ou reprovado: {name}')
+          print('Checks aprovados para o SHA de deploy')
+          PYTHON
+
+      - name: Set environment metadata
+        id: env
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          if [ "${TARGET_BRANCH}" = "main" ]; then
+            echo "env_canon=production" >> "$GITHUB_OUTPUT"
+            echo "k8s_ns=oficina-prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "env_canon=homolog" >> "$GITHUB_OUTPUT"
+            echo "k8s_ns=oficina-homolog" >> "$GITHUB_OUTPUT"
           fi
-          if [ "${TARGET_BRANCH}" = "main" ] && echo "${FIRESTORE_DB}" | grep -Eq "homolog"; then
-            echo "ERROR: Production deployment points to homolog Firestore database!"
-            exit 1
-          fi
+          echo "image_tag=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
+
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: 'projects/936717667971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
           service_account: 'github-actions-sa@fiap-project-514922.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK & GKE credentials
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          install_components: "gke-gcloud-auth-plugin"
+
+      - name: Configure Docker & GKE
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          gcloud container clusters get-credentials "${CLUSTER_NAME}" --zone "${CLUSTER_ZONE}" --project "${PROJECT_ID}"
+
+      - name: Build and push immutable Docker image
+        env:
+          IMAGE_TAG: ${{ steps.env.outputs.image_tag }}
+        run: |
+          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          docker build -t "${IMAGE_URI}" .
+          docker push "${IMAGE_URI}"
+
+      - name: Render Kubernetes manifests
+        env:
+          ENV_CANON: ${{ steps.env.outputs.env_canon }}
+          K8S_NS: ${{ steps.env.outputs.k8s_ns }}
+          IMAGE_TAG: ${{ steps.env.outputs.image_tag }}
+          GATEWAY_HOST_INPUT: ${{ inputs.gateway_host }}
+        run: |
+          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          GW_HOST="${GATEWAY_HOST_INPUT}"
+          if [ -z "${GW_HOST}" ]; then
+            GW_HOST="$(gcloud api-gateway gateways describe "oficina-gateway-${ENV_CANON}" --location=us-east1 --project="${PROJECT_ID}" --format="value(defaultHostname)")"
+          fi
+
+          mkdir -p /tmp/rendered-k8s
+          cp k8s/*.yaml /tmp/rendered-k8s/
+
+          for f in /tmp/rendered-k8s/*.yaml; do
+            sed -i "s|us-east1-docker.pkg.dev/fiap-project-514922/oficina-docker/oficina-execucao:latest|${IMAGE_URI}|g" "$f"
+            sed -i "s|oficina-execucao-homolog-sa|oficina-execucao-${ENV_CANON}-sa|g" "$f"
+            sed -i "s|oficina-execucao-homolog|oficina-execucao-${ENV_CANON}|g" "$f"
+            sed -i "s|oficina-backend-homolog|oficina-backend-${ENV_CANON}|g" "$f"
+            sed -i "s|oficina-auth-homolog|oficina-auth-${ENV_CANON}|g" "$f"
+            sed -i "s|oficina-admin-homolog|oficina-admin-${ENV_CANON}|g" "$f"
+            sed -i "s|ENVIRONMENT: \"homolog\"|ENVIRONMENT: \"${ENV_CANON}\"|g" "$f"
+            sed -i "s|DD_VERSION: \"latest\"|DD_VERSION: \"${IMAGE_TAG}\"|g" "$f"
+            sed -i "s|GATEWAY_HOST_PLACEHOLDER|${GW_HOST}|g" "$f"
+            sed -i 's/value: "latest"/value: "'"${IMAGE_TAG}"'"/g' "$f"
+          done
+
+          kubectl create namespace "${K8S_NS}" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy API and Worker
+        env:
+          K8S_NS: ${{ steps.env.outputs.k8s_ns }}
+        run: |
+          kubectl -n "${K8S_NS}" apply -f /tmp/rendered-k8s/serviceaccount.yaml
+          kubectl -n "${K8S_NS}" apply -f /tmp/rendered-k8s/configmap.yaml
+          kubectl -n "${K8S_NS}" apply -f /tmp/rendered-k8s/service.yaml
+          kubectl -n "${K8S_NS}" apply -f /tmp/rendered-k8s/deployment.yaml
+          kubectl -n "${K8S_NS}" apply -f /tmp/rendered-k8s/deployment-worker.yaml
+          kubectl -n "${K8S_NS}" apply -f /tmp/rendered-k8s/hpa.yaml
+          kubectl -n "${K8S_NS}" rollout status deployment/oficina-execucao --timeout=300s
+          kubectl -n "${K8S_NS}" rollout status deployment/oficina-execucao-worker --timeout=300s

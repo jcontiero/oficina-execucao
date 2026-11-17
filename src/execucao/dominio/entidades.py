@@ -86,10 +86,13 @@ class ControleSagaExecucao:
             )
         if self.estado_controle == EstadoControleSaga.CONCLUIDO:
             raise ValueError("Reparo já concluído")
-        if self.estado_controle != EstadoControleSaga.REPARO_INICIADO:
-            self.estado_controle = EstadoControleSaga.REPARO_INICIADO
-            self.iniciado_em = datetime.now(timezone.utc)
-            self.version += 1
+        if self.estado_controle == EstadoControleSaga.REPARO_INICIADO:
+            raise ValueError("Reparo já iniciado")
+        if self.estado_controle != EstadoControleSaga.EM_FILA:
+            raise ValueError("Execução ainda não enfileirada após pagamento autorizado")
+        self.estado_controle = EstadoControleSaga.REPARO_INICIADO
+        self.iniciado_em = datetime.now(timezone.utc)
+        self.version += 1
 
 
 @dataclass
@@ -124,10 +127,19 @@ class ReservaEstoque:
                 "event_type": "ReservaLiberacaoRecusada.v1",
                 "resultado": "RECUSADA",
                 "motivo": "RESERVA_CONSUMIDA",
+                "repor_estoque": False,
+            }
+        if self.status == StatusReserva.LIBERADA:
+            return {
+                "event_type": "ReservaLiberada.v1",
+                "resultado": "JA_LIBERADA",
+                "motivo": controle.motivo_cancelamento or "CANCELADA",
+                "repor_estoque": False,
             }
         self.status = StatusReserva.LIBERADA
         return {
             "event_type": "ReservaLiberada.v1",
             "resultado": "LIBERADA",
             "motivo": controle.motivo_cancelamento or "CANCELADA",
+            "repor_estoque": True,
         }
