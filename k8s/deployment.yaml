@@ -23,6 +23,7 @@ spec:
         tags.datadoghq.com/service: oficina-execucao
     spec:
       serviceAccountName: oficina-execucao-sa
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
