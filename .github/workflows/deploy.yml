@@ -1,0 +1,49 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: "Digite 'true' para autorizar o build/push/deploy do oficina-execucao no GKE"
+        required: true
+        default: "false"
+
+env:
+  PROJECT_ID: "fiap-project-514922"
+  REGION: "us-east1"
+  REPOSITORY: "oficina-docker"
+  IMAGE_NAME: "oficina-execucao"
+
+concurrency:
+  group: deploy-oficina-execucao-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm_deploy == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/homolog')
+    environment: ${{ github.ref_name == 'main' && 'production' || 'homolog' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Homolog / Production Firestore Isolation
+        env:
+          FIRESTORE_DB: ${{ vars.FIRESTORE_DATABASE }}
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          echo "Verifying Firestore target isolation for ${TARGET_BRANCH}..."
+          if [ "${TARGET_BRANCH}" = "homolog" ] && echo "${FIRESTORE_DB}" | grep -Eq "production"; then
+            echo "ERROR: Homolog deployment points to production Firestore database!"
+            exit 1
+          fi
+          if [ "${TARGET_BRANCH}" = "main" ] && echo "${FIRESTORE_DB}" | grep -Eq "homolog"; then
+            echo "ERROR: Production deployment points to homolog Firestore database!"
+            exit 1
+          fi
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/936717667971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'github-actions-sa@fiap-project-514922.iam.gserviceaccount.com'
