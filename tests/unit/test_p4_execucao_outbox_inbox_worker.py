@@ -159,7 +159,7 @@ def test_reserva_atomica_sem_parcialidade_deduplicacao_e_liberacao():
             "compensacao_id": str(uuid4()),
             "motivo": "FALHA_ENFILEIRAMENTO",
             "reserva_id": str(saga_ok),
-            "execucao_cancelada_event_id": str(cancel_evt_id),
+            "execucao_cancelada_event_id": str(ctrl.cancelamento_event_id),
         },
     )
     assert cons.processar_comando(cmd_liberar) == "PROCESSADO"

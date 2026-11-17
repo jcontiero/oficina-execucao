@@ -342,8 +342,9 @@ class ExecucaoConsumidor:
                 return "PROCESSADO"
 
             if evt == "CancelarExecucao.v1":
+                exec_cancelada_event_id = uuid4()
                 res = controle.cancelar_com_tombstone(
-                    cancelamento_event_id=envelope.event_id,
+                    cancelamento_event_id=exec_cancelada_event_id,
                     motivo=str(p["motivo"]),
                 )
                 tx.salvar("controle_saga", saga_key, _controle_to_dict(controle))
@@ -375,6 +376,9 @@ class ExecucaoConsumidor:
                     payload=payload_resp,
                     traceparent=traceparent,
                 )
+                out["id"] = str(exec_cancelada_event_id)
+                out["event_id"] = str(exec_cancelada_event_id)
+                out["envelope"]["event_id"] = str(exec_cancelada_event_id)
                 tx.salvar("outbox", out["id"], out)
                 return "PROCESSADO"
 
