@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import Configuracoes
+from src.catalogo.apresentacao.rotas import router as catalogo_router
+from src.estoque.apresentacao.rotas import router as estoque_router
 from src.execucao.apresentacao.rotas import router as execucao_router
 from src.execucao.infraestrutura.firestore_store import (
     GoogleFirestoreStore,
@@ -68,6 +70,8 @@ def criar_app(configuracoes: Configuracoes | None = None) -> FastAPI:
                 detail=f"Firestore not ready: {exc}",
             ) from exc
 
+    app.include_router(catalogo_router)
+    app.include_router(estoque_router)
     app.include_router(execucao_router)
     return app
 

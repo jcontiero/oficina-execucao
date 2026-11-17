@@ -1,0 +1,16 @@
+from typing import Protocol
+from uuid import UUID
+
+from src.catalogo.dominio.entidades import Servico
+
+
+class ServicoRepositorio(Protocol):
+    def salvar(self, servico: Servico) -> Servico: ...
+
+    def buscar_por_id(self, id: UUID) -> Servico | None: ...
+
+    def listar(self, busca: str | None = None) -> list[Servico]: ...
+
+    def atualizar(self, servico: Servico) -> Servico: ...
+
+    def remover(self, id: UUID) -> None: ...

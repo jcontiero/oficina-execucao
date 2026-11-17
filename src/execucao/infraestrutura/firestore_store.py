@@ -17,6 +17,8 @@ class DocumentoStore(Protocol):
 
     def listar(self, colecao: str) -> list[dict[str, Any]]: ...
 
+    def remover(self, colecao: str, doc_id: str) -> None: ...
+
 
 class InMemoryFirestoreStore:
     """
@@ -47,6 +49,10 @@ class InMemoryFirestoreStore:
         col = self._cols.get(colecao, {})
         return [dict(v) for v in col.values()]
 
+    def remover(self, colecao: str, doc_id: str) -> None:
+        col = self._cols.get(colecao, {})
+        col.pop(doc_id, None)
+
 
 class GoogleFirestoreStore:
     """
@@ -63,9 +69,12 @@ class GoogleFirestoreStore:
 
         emulator = os.getenv("FIRESTORE_EMULATOR_HOST", "")
         if emulator:
+            # Limitação técnica do Firestore Emulator local: opera apenas sobre o banco
+            # padrão '(default)'. Em GCP (homolog/production), conecta aos bancos
+            # nomeados 'oficina-execucao-homolog' e 'oficina-execucao-production'.
             self.client = firestore.Client(
                 project=config.gcp_project_id,
-                database=config.firestore_database,
+                database="(default)",
                 credentials=AnonymousCredentials(),
             )
         else:
@@ -94,6 +103,9 @@ class GoogleFirestoreStore:
 
     def listar(self, colecao: str) -> list[dict[str, Any]]:
         return [doc.to_dict() for doc in self.client.collection(colecao).stream()]
+
+    def remover(self, colecao: str, doc_id: str) -> None:
+        self.client.collection(colecao).document(doc_id).delete()
 
 
 class ExecucaoRepositorioFirestore:
@@ -144,3 +156,9 @@ class ExecucaoRepositorioFirestore:
 
     def listar_execucoes(self) -> list[dict[str, Any]]:
         return self.store.listar("execucoes")
+
+    def salvar_reserva(self, saga_id: UUID, dados: dict[str, Any]) -> dict[str, Any]:
+        return self.store.salvar("reservas", str(saga_id), dados)
+
+    def buscar_reserva(self, saga_id: UUID) -> dict[str, Any] | None:
+        return self.store.buscar("reservas", str(saga_id))
