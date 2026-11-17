@@ -1,3 +1,4 @@
+from src.shared.observabilidade import consumir_contexto
 from datetime import datetime, timedelta, timezone
 import json
 import logging
@@ -112,7 +113,8 @@ def consumir_comandos_pull(
         try:
             dados = json.loads(rec.message.data.decode("utf-8"))
             traceparent = (rec.message.attributes or {}).get("traceparent")
-            cons.processar_comando(dados, traceparent=traceparent)
+            with consumir_contexto(dados, traceparent) as traceparent:
+                cons.processar_comando(dados, traceparent=traceparent)
             subscriber.acknowledge(
                 request={"subscription": sub_path, "ack_ids": [ack_id]}
             )
