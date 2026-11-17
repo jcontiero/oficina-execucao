@@ -32,6 +32,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      checks: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
