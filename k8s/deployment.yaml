@@ -22,7 +22,7 @@ spec:
         app: oficina-execucao
         tags.datadoghq.com/service: oficina-execucao
     spec:
-      automountServiceAccountToken: false
+      serviceAccountName: oficina-execucao-sa
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -30,15 +30,13 @@ spec:
       containers:
         - name: api
           image: us-east1-docker.pkg.dev/fiap-project-514922/oficina-docker/oficina-execucao:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8000
           envFrom:
             - configMapRef:
                 name: oficina-execucao-config
-            - secretRef:
-                name: oficina-execucao-secret
           env:
             - name: DD_ENV
               valueFrom:
@@ -46,8 +44,6 @@ spec:
                   fieldPath: metadata.namespace
             - name: DD_SERVICE
               value: "oficina-execucao"
-            - name: DD_VERSION
-              value: "latest"
             - name: DD_AGENT_HOST
               valueFrom:
                 fieldRef:
