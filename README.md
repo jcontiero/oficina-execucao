@@ -1,5 +1,7 @@
 # Oficina Execução Service (`oficina-execucao`)
 
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=jcontiero_oficina-execucao&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jcontiero_oficina-execucao)
+
 Microsserviço de Execução, Diagnóstico, Catálogo de Serviços e Estoque de Peças com persistência NoSQL (**Google Cloud Firestore Native Mode**) da Fase 4 do Tech Challenge.
 
 ## Responsabilidades
